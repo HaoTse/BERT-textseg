@@ -151,6 +151,23 @@ class Examples():
 
         return sections
 
+    def _check_data(self, datas, targets):
+        ret_data = []
+        ret_targets = []
+
+        for data, target in zip(datas, targets):
+            # filter too short data
+            if len(data) <= 2:
+                continue
+
+            # filter too less <seg> data
+            if sum(target) < 1:
+                continue
+            ret_data.append(data)
+            ret_targets.append(target)
+
+        return ret_data, ret_targets
+
     def _read_wiki_file(self, path, remove_preface_segment=True, ignore_list=False):
         ret_data = []
         ret_targets = []
@@ -176,6 +193,8 @@ class Examples():
                 # check data length
                 if sum(len(x) for x in data) + 2 * len(data) + total_size > 512:
                     ret_data.append(data)
+                    # let tha last element isn't <seg>
+                    targets[-1] = 0
                     ret_targets.append(targets)
                     data = []
                     targets = []
@@ -189,5 +208,5 @@ class Examples():
                 if targets:
                     targets[-1] = 1
 
-        return ret_data, ret_targets
+        return self._check_data(ret_data, ret_targets)
     

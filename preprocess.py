@@ -29,6 +29,8 @@ if __name__ == "__main__":
     print(f'[Preprocess] Get developing data with size {len(dev_data)}')
     print(f'[Preprocess] Get testing data with size {len(test_data)}')
 
+    if not os.path.exists(args.tgt_path):
+        os.mkdir(args.tgt_path)
     torch.save(train_data, os.path.join(args.tgt_path, 'train.pt'))
     torch.save(dev_data, os.path.join(args.tgt_path, 'dev.pt'))
     torch.save(test_data, os.path.join(args.tgt_path, 'test.pt'))
