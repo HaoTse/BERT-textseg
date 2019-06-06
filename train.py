@@ -97,8 +97,18 @@ def accuracy(out, labels, mask):
     return sum(map(sum, outputs)) / count
 
 
-def select_seg(sent_idx, examples, scores, mask):
+def select_seg(sent_idx, examples, scores, mask, spec='prob', crit=0.5):
     """Find the prediction and selected ids."""
+    # check criterion
+    if spec == 'prob' or spec == 'amount_prob':
+        if crit > 1 or crit < 0:
+            raise RuntimeError('Criterion error')
+    elif spec == 'amount':
+        if crit < 2:
+            raise RuntimeError('Criterion error')
+    else:
+        raise RuntimeError('Criterion error')
+
     sent_scores = scores + mask
     selected_ids = np.argsort(-sent_scores, 1) # [batch size, clss length, 1]
 
@@ -113,14 +123,24 @@ def select_seg(sent_idx, examples, scores, mask):
         example = examples[sent_idx[i]]
         src_str = example['src_txt']
 
+        if spec == 'amount' and crit > len(src_str) * 0.5:
+            raise RuntimeError('Criterion error, specific amount too much')
+
         for j in selected_ids[i][:len(src_str)]:
             if(j >= len(src_str)):
                 continue
             src_str[j] = src_str[j] + ' <sep>'
             _idx.append(j)
 
-            if len(_idx) >= len(src_str) / 2:
-                break
+            if spec == 'prob':
+                if sent_scores[i][j] - 1 <= crit:
+                    break
+            elif spec == 'amount':
+                if len(_idx) >= crit:
+                    break
+            elif spec == 'amount_prob':
+                if len(_idx) >= len(src_str) * crit:
+                    break
 
         _pred = ' '.join(src_str)
 
@@ -368,12 +388,7 @@ def test(args):
         n_gpu = 1
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.distributed.init_process_group(backend='nccl')
-    print("[Test] device: {} n_gpu: {}, distributed training: {}, 16-bits training: {}".format(
-        device, n_gpu, bool(args.local_rank != -1), args.fp16))
-
-    if args.gradient_accumulation_steps < 1:
-        raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
-                            args.gradient_accumulation_steps))
+    print("[Train] device: {} n_gpu: {}".format(device, n_gpu))
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -503,11 +518,11 @@ if __name__ == "__main__":
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
     parser.add_argument("--train_batch_size",
-                        default=1,
+                        default=32,
                         type=int,
                         help="Total batch size for training.")
     parser.add_argument("--eval_batch_size",
-                        default=1,
+                        default=8,
                         type=int,
                         help="Total batch size for eval.")
     parser.add_argument("--learning_rate",
@@ -547,7 +562,7 @@ if __name__ == "__main__":
                              "0 (default value): dynamic loss scaling.\n"
                              "Positive power of 2: static loss scaling value.\n")
     parser.add_argument("--param_init", default=0, type=float)
-    parser.add_argument("--param_init_glorot", type=str2bool, nargs='?',const=True,default=True)
+    parser.add_argument("--param_init_glorot", type=str2bool, nargs='?', const=True, default=True)
     parser.add_argument('--server_ip', type=str, default='', help="Can be used for distant debugging.")
     parser.add_argument('--server_port', type=str, default='', help="Can be used for distant debugging.")
 

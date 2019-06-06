@@ -6,6 +6,7 @@ from tqdm import tqdm
 from pytorch_pretrained_bert import BertTokenizer
 
 import utils.wiki_utils as wiki_utils
+from utils.text_manipulation import split_sentences
 from utils.my_logging import logger
 
 
@@ -17,6 +18,42 @@ class Examples():
         self.pad_vid = self.tokenizer.vocab['[PAD]']
 
         self.high_granularity = high_granularity
+
+    def convert_to_example(self, texts):
+        texts = [text.strip() for text in texts if text.strip()]
+
+        if not texts:
+            raise RuntimeError('Input texts is empty')
+
+        pt_data = []
+        for text in texts:
+            sentences = split_sentences(text)
+            # transfer to bert data
+            src_txt = [' '.join(sent) for sent in sentences]
+            src_txt = ' [SEP] [CLS] '.join(src_txt)
+            src_subtokens = self.tokenizer.tokenize(src_txt)
+            src_subtokens = src_subtokens[:510] # max length of BERT is 512
+            src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
+
+            # deal special token
+            if len(src_subtokens) > 512:
+                raise RuntimeError('Contain special token' + ' '.join(src_subtokens))
+            src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
+
+            _segs = [-1] + [i for i, t in enumerate(src_subtoken_idxs) if t == self.sep_vid]
+            segs = [_segs[i] - _segs[i - 1] for i in range(1, len(_segs))]
+            segments_ids = []
+            for i, s in enumerate(segs):
+                if (i % 2 == 0):
+                    segments_ids += s * [0]
+                else:
+                    segments_ids += s * [1]
+            cls_ids = [i for i, t in enumerate(src_subtoken_idxs) if t == self.cls_vid]
+
+            pt_data.append({'src_txt': sentences, 'src_idx': src_subtoken_idxs, 'segments_ids': segments_ids, 'cls_ids': cls_ids})
+
+        return pt_data
+
     
     def get_example(self, root, dataset='None', folder=False):
         if (folder):

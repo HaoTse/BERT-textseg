@@ -31,7 +31,9 @@ class Summarizer(nn.Module):
         self.args = args
         self.device = device
 
-        cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
+        cache_dir = None
+        if load_pretrained_bert:
+            cache_dir = args.cache_dir if args.cache_dir else os.path.join(str(PYTORCH_PRETRAINED_BERT_CACHE), 'distributed_{}'.format(args.local_rank))
         self.bert = Bert(args.bert_model, cache_dir, load_pretrained_bert, bert_config)
         self.encoder = Classifier(self.bert.model.config.hidden_size)
         self.config = self.bert.model.config

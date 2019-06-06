@@ -108,3 +108,9 @@ data/
 
 # logs folder
 logs/
+
+# models folder
+models/
+
+# result foler
+result/
