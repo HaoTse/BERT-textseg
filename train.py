@@ -14,6 +14,7 @@ from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NA
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 from utils.my_logging import logger, init_logger
+from utils.accuracy import convert_segeval_format, acc_computer
 from summarizer.model_builder import Summarizer
 
 
@@ -92,9 +93,16 @@ def get_dataset(features):
 
 
 def accuracy(out, labels, mask):
-    outputs = [(i == j) * m for i, j, m in zip(out, labels, mask)]
-    count = sum(map(sum, mask))
-    return sum(map(sum, outputs)) / count
+    def _mean(l):
+        return float(sum(l)) / float(len(l))
+
+    pred = [convert_segeval_format(x, m) for x, m in zip(out, mask)]
+    gold = [convert_segeval_format(x, m) for x, m in zip(labels, mask)]
+    assert len(pred) == len(gold)
+
+    pk, windiff, bound_sim = zip(*[acc_computer(p, g) for p, g in zip(pred, gold)])
+    
+    return _mean(pk), _mean(windiff), _mean(bound_sim)
 
 
 def select_seg(sent_idx, examples, scores, mask, spec='prob', crit=0.5):
@@ -326,7 +334,7 @@ def train(args):
         if eval_dataloader and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
             model.eval()
 
-            eval_loss, eval_accuracy = 0, 0
+            eval_loss, eval_pk, eval_windiff, eval_bound_sim = 0, 0, 0, 0
             nb_eval_steps, nb_eval_examples = 0, 0
 
             for sent_idx, input_ids, input_mask, segment_ids, clss_ids, clss_mask, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
@@ -349,21 +357,25 @@ def train(args):
                 label_ids = label_ids.to('cpu').numpy()
                 # find selected sentences
                 _pred, selected_ids = select_seg(sent_idx, eval_examples, sent_scores, mask)
-                tmp_eval_accuracy = accuracy(selected_ids, label_ids, mask)
+                tmp_pk, tmp_windiff, tmp_bound_sim = accuracy(selected_ids, label_ids, mask)
 
                 eval_loss += tmp_eval_loss.mean().item()
-                eval_accuracy += tmp_eval_accuracy
+                eval_pk += tmp_pk
+                eval_windiff += tmp_windiff
+                eval_bound_sim += tmp_bound_sim
 
                 nb_eval_examples += input_ids.size(0)
                 nb_eval_steps += 1
 
             eval_loss = eval_loss / nb_eval_steps
-            eval_accuracy = eval_accuracy / nb_eval_examples
+            eval_pk = eval_pk / nb_eval_examples
+            eval_windiff = eval_windiff / nb_eval_examples
+            eval_bound_sim = eval_bound_sim / nb_eval_examples
             cur_loss = eval_loss
             
         # output result of an epoch
         print(f'  - (Training)   loss: {train_loss: 8.5f}')
-        print(f'  - (Validation) loss: {eval_loss: 8.5f}, accuracy: {100 * eval_accuracy: 3.3f} %')
+        print(f'  - (Validation) loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} %, Pk: {100 * eval_windiff: 3.3f} %, Pk: {100 * eval_bound_sim: 3.3f} %')
         
         # record best model
         if cur_loss < best_performance:
@@ -388,7 +400,7 @@ def test(args):
         n_gpu = 1
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
         torch.distributed.init_process_group(backend='nccl')
-    print("[Train] device: {} n_gpu: {}".format(device, n_gpu))
+    print("[Test] device: {} n_gpu: {}".format(device, n_gpu))
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -419,7 +431,7 @@ def test(args):
 
     # prepare testing data
     eval_dataloader = None
-    eval_path = os.path.join(args.data_path, 'dev')
+    eval_path = os.path.join(args.data_path, 'test.pt')
     print(f"[Test] ***** Prepare testing data from {eval_path} *****")
 
     eval_examples = torch.load(eval_path)
@@ -437,7 +449,7 @@ def test(args):
     if eval_dataloader and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
         model.eval()
 
-        eval_loss, eval_accuracy = 0, 0
+        eval_loss, eval_pk, eval_windiff, eval_bound_sim = 0, 0, 0, 0
         nb_eval_steps, nb_eval_examples = 0, 0
 
         for sent_idx, input_ids, input_mask, segment_ids, clss_ids, clss_mask, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
@@ -461,25 +473,27 @@ def test(args):
             # find selected sentences
             _pred, selected_ids = select_seg(sent_idx, eval_examples, sent_scores, mask)
             preds.extend(_pred)
-            tmp_eval_accuracy = accuracy(selected_ids, label_ids, mask)
+            tmp_pk, tmp_windiff, tmp_bound_sim = accuracy(selected_ids, label_ids, mask)
 
             eval_loss += tmp_eval_loss.mean().item()
-            eval_accuracy += tmp_eval_accuracy
+            eval_pk += tmp_pk
+            eval_windiff += tmp_windiff
+            eval_bound_sim += tmp_bound_sim
 
             nb_eval_examples += input_ids.size(0)
             nb_eval_steps += 1
 
         eval_loss = eval_loss / nb_eval_steps
-        eval_accuracy = eval_accuracy / nb_eval_examples
+        eval_pk = eval_pk / nb_eval_examples
+        eval_windiff = eval_windiff / nb_eval_examples
+        eval_bound_sim = eval_bound_sim / nb_eval_examples
             
         # print result
-        print(f'[Test] loss: {eval_loss: 8.5f}, accuracy: {100 * eval_accuracy: 3.3f} %')
+        print(f'[Test] loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} %, Pk: {100 * eval_windiff: 3.3f} %, Pk: {100 * eval_bound_sim: 3.3f} %')
 
     # output results
     path_dir = args.result_path
     os.makedirs(path_dir, exist_ok=True)
-    with open(os.path.join(path_dir, 'targets.txt'), 'w', encoding='utf-8') as f:
-        f.write('\n'.join(refs))
     with open(os.path.join(path_dir, 'preds.txt'), 'w', encoding='utf-8') as f:
         f.write('\n'.join(preds))
 
