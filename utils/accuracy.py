@@ -12,14 +12,13 @@ def convert_segeval_format(result, mask):
     else:
         return tuple(map(operator.sub, ret[1:], ret[:-1]))
 
-def acc_computer(pred, gold, window_size=-1):
+def acc_calculator(pred, gold, window_size=-1):
     if window_size == -1:
         pk_score = segeval.pk(pred, gold)
-        # windiff score cannot be applied in length smaller than 2
-        windiff_score = segeval.window_diff(pred, gold) if sum(pred) > 2 else 0
+        windiff_score = segeval.window_diff(pred, gold)
     else:
         pk_score = segeval.pk(pred, gold, window_size=window_size)
-        windiff_score = segeval.window_diff(pred, gold, window_size=window_size) if sum(pred) > 2 else 0
+        windiff_score = segeval.window_diff(pred, gold, window_size=window_size)
     b_score = segeval.boundary_similarity(pred, gold)
 
     return pk_score, windiff_score, b_score

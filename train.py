@@ -14,7 +14,7 @@ from pytorch_pretrained_bert.modeling import BertConfig, WEIGHTS_NAME, CONFIG_NA
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
 
 from utils.my_logging import logger, init_logger
-from utils.accuracy import convert_segeval_format, acc_computer
+from utils.accuracy import convert_segeval_format, acc_calculator
 from summarizer.model_builder import Summarizer
 
 
@@ -100,7 +100,7 @@ def accuracy(out, labels, mask):
     gold = [convert_segeval_format(x, m) for x, m in zip(labels, mask)]
     assert len(pred) == len(gold)
 
-    pk, windiff, bound_sim = zip(*[acc_computer(p, g) for p, g in zip(pred, gold)])
+    pk, windiff, bound_sim = zip(*[acc_calculator(p, g, window_size=4) for p, g in zip(pred, gold)])
     
     return _mean(pk), _mean(windiff), _mean(bound_sim)
 
@@ -375,7 +375,7 @@ def train(args):
             
         # output result of an epoch
         print(f'  - (Training)   loss: {train_loss: 8.5f}')
-        print(f'  - (Validation) loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} %, Pk: {100 * eval_windiff: 3.3f} %, Pk: {100 * eval_bound_sim: 3.3f} %')
+        print(f'  - (Validation) loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} , WinDiff: {100 * eval_windiff: 3.3f} , Boundary Similarity: {100 * eval_bound_sim: 3.3f} ')
         
         # record best model
         if cur_loss < best_performance:
@@ -489,7 +489,7 @@ def test(args):
         eval_bound_sim = eval_bound_sim / nb_eval_examples
             
         # print result
-        print(f'[Test] loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} %, Pk: {100 * eval_windiff: 3.3f} %, Pk: {100 * eval_bound_sim: 3.3f} %')
+        print(f'[Test] loss: {eval_loss: 8.5f}, Pk: {100 * eval_pk: 3.3f} , WinDiff: {100 * eval_windiff: 3.3f} , Boundary Similarity: {100 * eval_bound_sim: 3.3f} ')
 
     # output results
     path_dir = args.result_path
